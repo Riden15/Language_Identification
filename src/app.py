@@ -1,16 +1,14 @@
 import logging
 import os
 import pickle
-import urllib.request
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
-from typing import Any
+from typing import Dict
 
 import numpy as np
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Configurazione del Logging
@@ -29,11 +27,15 @@ log_formatter = logging.Formatter(
 
 logger = logging.getLogger("MuseumLangApi")
 logger.setLevel(logging.INFO)
+logger.propagate = False
+
+# Handler su console
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(log_formatter)
+logger.addHandler(console_handler)
 
 # Handler su file con rotazione automatica
-file_handler = RotatingFileHandler(
-    LOG_FILE, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT, encoding="utf-8"
-)
+file_handler = RotatingFileHandler(LOG_FILE, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT, encoding="utf-8")
 file_handler.setFormatter(log_formatter)
 logger.addHandler(file_handler)
 
@@ -41,49 +43,39 @@ logger.addHandler(file_handler)
 # Caricamento del Modello
 # ---------------------------------------------------------------------------
 # Il modello viene caricato una sola volta all'avvio dell'applicazione tramite
-# il meccanismo 'lifespan' di FastAPI. Viene salvato in un dizionario condiviso
-# (app.state) accessibile da tutti gli endpoint.
+# il meccanismo 'lifespan' di FastAPI.
 
-MODEL_URL = "https://github.com/Profession-AI/progetti-python/raw/refs/heads/main/Messa%20in%20produzione%20di%20un%20sistema%20per%20il%20riconoscimento%20della%20lingua%20di%20testi%20per%20un%20museo/languagedetectionpipeline.pkl"
-
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "languagedetectionpipeline.pkl")
+MODEL_PATH = os.path.join(os.getcwd(), "../models/mlp_model.pkl")
 
 
 # ---------------------------------------------------------------------------
-# Lifespan: download e caricamento del modello all'avvio
+# Lifespan: caricamento e rilascio del modello
 # ---------------------------------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Scarica (se necessario) e carica il modello all'avvio; lo libera allo shutdown."""
-    # --- Download del modello ---
-    if not os.path.exists(MODEL_PATH):
-        logger.info(f"Modello non trovato in locale. Download da:\n  {MODEL_URL}")
-        try:
-            urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
-            logger.info(f"Modello scaricato con successo in: {MODEL_PATH}")
-        except Exception as e:
-            logger.error(f"Errore durante il download del modello: {e}")
-            app.state.pipeline = None
-            yield
-            return
-    else:
-        logger.info(f"Modello già presente in locale: {MODEL_PATH}")
-
-    # --- Caricamento del modello ---
+    """
+    Gestisce il ciclo di vita dell'applicazione:
+    - All'avvio: carica il modello dal file pickle e lo salva in app.state.pipeline.
+    - Allo spegnimento: libera la risorsa.
+    """
+    logger.info(f"Caricamento del modello da: {MODEL_PATH}")
     try:
         with open(MODEL_PATH, "rb") as f:
             app.state.pipeline = pickle.load(f)
-        logger.info("Pipeline caricata con successo.")
+        logger.info("Modello caricato con successo.")
+    except FileNotFoundError:
+        logger.error(f"File del modello non trovato: {MODEL_PATH}")
+        app.state.pipeline = None
     except Exception as e:
         logger.error(f"Errore durante il caricamento del modello: {e}")
         app.state.pipeline = None
 
     yield  # L'applicazione è in esecuzione
 
-    # --- Cleanup allo shutdown ---
+    # Cleanup all'arresto
     app.state.pipeline = None
-    logger.info("Pipeline rimossa dalla memoria.")
+    logger.info("Modello rilasciato. Applicazione terminata.")
 
 
 # ---------------------------------------------------------------------------
@@ -106,56 +98,25 @@ app = FastAPI(
 
 class TextInput(BaseModel):
     """Schema di input per l'endpoint di identificazione lingua."""
-    text: str
+
     model_config = {
         "json_schema_extra": {
             "example": {"text": "Questo è un esempio di testo in italiano."}
         }
     }
 
+    text: str = Field(..., min_length=1, description="Il testo da analizzare (non può essere vuoto).")
+
 
 class LanguageResponse(BaseModel):
     """Schema di output con il codice lingua identificato e la confidenza."""
-    language_code: str
-    confidence: float
+    predicted_probability: Dict[str, float] = Field(..., description='Predicted prob')
+    predicted_cls: str = Field(...)
 
 
 class ErrorResponse(BaseModel):
     """Schema di output per i messaggi di errore."""
     error: str
-
-
-# ---------------------------------------------------------------------------
-# Funzione ausiliaria: estrazione confidenza
-# ---------------------------------------------------------------------------
-
-def get_confidence(pipeline: Any, text: str) -> float:
-    """
-    Calcola la confidenza della previsione.
-
-    Tenta di usare predict_proba() (supportato da Naive Bayes, MLP, ecc.).
-    Se il classificatore non supporta predict_proba (es. LinearSVC), restituisce 1.0
-    come valore di fallback conservativo.
-
-    Args:
-        pipeline: La sklearn Pipeline caricata dal pickle.
-        text:     Il testo di cui si vuole la confidenza.
-
-    Returns:
-        Confidenza come float tra 0.0 e 1.0.
-    """
-    try:
-        probabilities = pipeline.predict_proba([text])
-        # predict_proba restituisce un array (n_samples, n_classes); prendiamo il max
-        confidence = float(np.max(probabilities))
-    except AttributeError:
-        # Il classificatore non supporta predict_proba (es. LinearSVC)
-        logger.warning(
-            "Il classificatore non supporta predict_proba(). "
-            "Confidenza impostata a 1.0 come valore di fallback."
-        )
-        confidence = 1.0
-    return round(confidence, 4)
 
 
 # ---------------------------------------------------------------------------
@@ -203,8 +164,16 @@ async def identify_language(payload: TextInput) -> LanguageResponse:
 
     # --- Previsione ---
     try:
-        predicted_language = pipeline.predict([payload.text])[0]
-        confidence = get_confidence(pipeline, payload.text)
+        text_to_classify = np.array([payload.text]).reshape(-1, 1)
+
+        predicted_language = pipeline.predict(text_to_classify)[0]
+        predicted_proba = pipeline.predict_proba(text_to_classify)[0]
+
+        target_names = pipeline.classes_
+
+        predicted_proba_dict = {target_names[i]: predicted_proba[i] for i in range(len(predicted_proba))}
+        predicted_cls_name = target_names[predicted_language]
+
     except Exception as e:
         logger.error(f"Errore durante la previsione: {e}")
         raise HTTPException(
@@ -214,10 +183,10 @@ async def identify_language(payload: TextInput) -> LanguageResponse:
 
     # --- Log della risposta ---
     logger.info(
-        f"Risposta inviata    | language_code: {predicted_language} | confidence: {confidence}"
+        f"Risposta inviata    | language_code: {predicted_language} | confidence: {predicted_proba_dict}"
     )
 
-    return LanguageResponse(language_code=predicted_language, confidence=confidence)
+    return LanguageResponse(predicted_probability=predicted_proba_dict, predicted_cls=predicted_cls_name)
 
 
 # ---------------------------------------------------------------------------
