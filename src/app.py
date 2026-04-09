@@ -1,6 +1,7 @@
 import logging
 import os
 import pickle
+import urllib.request
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from typing import Any
@@ -43,9 +44,47 @@ logger.addHandler(file_handler)
 # il meccanismo 'lifespan' di FastAPI. Viene salvato in un dizionario condiviso
 # (app.state) accessibile da tutti gli endpoint.
 
-MODEL_URL = ("https://github.com/Profession-AI/progetti-python/raw/refs/heads/main/Messa%20in%20produzione%20di%20un"
-             "%20sistema%20per%20il%20riconoscimento%20della%20lingua%20di%20testi%20per%20un%20museo"
-             "/languagedetectionpipeline.pkl")
+MODEL_URL = "https://github.com/Profession-AI/progetti-python/raw/refs/heads/main/Messa%20in%20produzione%20di%20un%20sistema%20per%20il%20riconoscimento%20della%20lingua%20di%20testi%20per%20un%20museo/languagedetectionpipeline.pkl"
+
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "languagedetectionpipeline.pkl")
+
+
+# ---------------------------------------------------------------------------
+# Lifespan: download e caricamento del modello all'avvio
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Scarica (se necessario) e carica il modello all'avvio; lo libera allo shutdown."""
+    # --- Download del modello ---
+    if not os.path.exists(MODEL_PATH):
+        logger.info(f"Modello non trovato in locale. Download da:\n  {MODEL_URL}")
+        try:
+            urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+            logger.info(f"Modello scaricato con successo in: {MODEL_PATH}")
+        except Exception as e:
+            logger.error(f"Errore durante il download del modello: {e}")
+            app.state.pipeline = None
+            yield
+            return
+    else:
+        logger.info(f"Modello già presente in locale: {MODEL_PATH}")
+
+    # --- Caricamento del modello ---
+    try:
+        with open(MODEL_PATH, "rb") as f:
+            app.state.pipeline = pickle.load(f)
+        logger.info("Pipeline caricata con successo.")
+    except Exception as e:
+        logger.error(f"Errore durante il caricamento del modello: {e}")
+        app.state.pipeline = None
+
+    yield  # L'applicazione è in esecuzione
+
+    # --- Cleanup allo shutdown ---
+    app.state.pipeline = None
+    logger.info("Pipeline rimossa dalla memoria.")
+
 
 # ---------------------------------------------------------------------------
 # Inizializzazione dell'Applicazione FastAPI
@@ -56,7 +95,8 @@ app = FastAPI(
     description=(
         "API REST per il riconoscimento automatico della lingua di testi museali. "
         "Supporta italiano (IT), inglese (EN) e tedesco (DE)."
-    )
+    ),
+    lifespan=lifespan,
 )
 
 
@@ -187,8 +227,6 @@ async def identify_language(payload: TextInput) -> LanguageResponse:
 if __name__ == "__main__":
     uvicorn.run(
         "app:app",
-        host="0.0.0.0",
-        port=8000,
         reload=False,  # reload=True utile solo in sviluppo
         log_level="info",
     )
