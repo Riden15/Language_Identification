@@ -1,3 +1,10 @@
+# Modello ML (file pickle scaricato a runtime, non versionato)
+*.pkl
+
+# Log dell'API (generati a runtime)
+api.log
+*.log
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
