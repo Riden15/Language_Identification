@@ -43,7 +43,9 @@ logger.addHandler(file_handler)
 # il meccanismo 'lifespan' di FastAPI. Viene salvato in un dizionario condiviso
 # (app.state) accessibile da tutti gli endpoint.
 
-MODEL_PATH = "languagedetectionpipeline.pkl"
+MODEL_URL = ("https://github.com/Profession-AI/progetti-python/raw/refs/heads/main/Messa%20in%20produzione%20di%20un"
+             "%20sistema%20per%20il%20riconoscimento%20della%20lingua%20di%20testi%20per%20un%20museo"
+             "/languagedetectionpipeline.pkl")
 
 # ---------------------------------------------------------------------------
 # Inizializzazione dell'Applicazione FastAPI
@@ -52,7 +54,8 @@ MODEL_PATH = "languagedetectionpipeline.pkl"
 app = FastAPI(
     title="MuseumLangAPI",
     description=(
-        "API REST per il riconoscimento automatico della lingua di testi museali. Supporta italiano (IT), inglese (EN) e tedesco (DE)."
+        "API REST per il riconoscimento automatico della lingua di testi museali. "
+        "Supporta italiano (IT), inglese (EN) e tedesco (DE)."
     )
 )
 
@@ -63,17 +66,7 @@ app = FastAPI(
 
 class TextInput(BaseModel):
     """Schema di input per l'endpoint di identificazione lingua."""
-
     text: str
-
-    @field_validator("text")
-    @classmethod
-    def text_must_not_be_empty(cls, value: str) -> str:
-        """Verifica che il testo non sia vuoto o composto solo da spazi bianchi."""
-        if not value or not value.strip():
-            raise ValueError("Il campo 'text' non può essere vuoto o contenere solo spazi.")
-        return value.strip()
-
     model_config = {
         "json_schema_extra": {
             "example": {"text": "Questo è un esempio di testo in italiano."}
@@ -83,20 +76,12 @@ class TextInput(BaseModel):
 
 class LanguageResponse(BaseModel):
     """Schema di output con il codice lingua identificato e la confidenza."""
-
     language_code: str
     confidence: float
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {"language_code": "IT", "confidence": 0.98}
-        }
-    }
 
 
 class ErrorResponse(BaseModel):
     """Schema di output per i messaggi di errore."""
-
     error: str
 
 
@@ -151,7 +136,7 @@ def get_confidence(pipeline: Any, text: str) -> float:
             "riconosciuta (IT, EN, DE) insieme alla confidenza della previsione."
     ),
 )
-async def identify_language(payload: TextInput):
+async def identify_language(payload: TextInput) -> LanguageResponse:
     """
     Identifica la lingua del testo fornito.
 
