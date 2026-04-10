@@ -19,7 +19,6 @@ LOG_FILE = "api.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024  # 5 MB per file di log
 LOG_BACKUP_COUNT = 3  # mantieni al massimo 3 file di backup
 
-# Formato del log: timestamp | livello | messaggio
 log_formatter = logging.Formatter(
     fmt="%(asctime)s | %(levelname)-8s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -43,17 +42,10 @@ if not logger.handlers:
 # ---------------------------------------------------------------------------
 # Caricamento del Modello
 # ---------------------------------------------------------------------------
-# Il modello viene caricato una sola volta all'avvio dell'applicazione tramite
-# il meccanismo 'lifespan' di FastAPI.
 
 MODEL_URL = "https://raw.githubusercontent.com/Profession-AI/progetti-python/refs/heads/main/Messa%20in%20produzione%20di%20un%20sistema%20per%20il%20riconoscimento%20della%20lingua%20di%20testi%20per%20un%20museo/language_detection_pipeline.pkl"
-
 MODEL_PATH = os.path.join(os.getcwd(), "../models/language_detection_pipeline.pkl")
 
-
-# ---------------------------------------------------------------------------
-# Lifespan: caricamento e rilascio del modello
-# ---------------------------------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -62,7 +54,8 @@ async def lifespan(app: FastAPI):
     - All'avvio: carica il modello dal file pickle e lo salva in app.state.pipeline.
     - Allo spegnimento: libera la risorsa.
     """
-    # --- Download del modello se non già presente ---
+
+    # Download del modello se non già presente
     if not os.path.exists(MODEL_PATH):
         logger.info(f"Modello non trovato localmente. Download da: {MODEL_URL}")
         try:
@@ -75,7 +68,7 @@ async def lifespan(app: FastAPI):
             yield
             return
 
-    # --- Caricamento del modello ---
+    # Caricamento del modello
     logger.info(f"Caricamento del modello da: {MODEL_PATH}")
     try:
         with open(MODEL_PATH, "rb") as f:
@@ -111,9 +104,11 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 
 class TextInput(BaseModel):
-    """Schema di input per l'endpoint di identificazione lingua."""
-
+    """
+    Schema di input per l'endpoint di identificazione lingua
+    """
     model_config = {
+        "extra": "forbid",  # Non accettare campi extra
         "json_schema_extra": {
             "example": {"text": "Questo è un esempio di testo in italiano."}
         }
@@ -123,13 +118,18 @@ class TextInput(BaseModel):
 
 
 class LanguageResponse(BaseModel):
-    """Schema di output con il codice lingua identificato e la confidenza."""
+    """
+    Schema di output per la risposta dell'endpoint di identificazione lingua.
+    Contiene un dizionario con le probabilità per ciascuna lingua e la lingua predetta.
+    """
     predicted_probability: Dict[str, float] = Field(..., description='Predicted prob')
     predicted_cls: str = Field(...)
 
 
 class ErrorResponse(BaseModel):
-    """Schema di output per i messaggi di errore."""
+    """
+    Schema di output per i messaggi di errore
+    """
     error: str
 
 
@@ -146,44 +146,30 @@ class ErrorResponse(BaseModel):
         500: {"model": ErrorResponse, "description": "Errore interno del server."},
     },
     summary="Identifica la lingua di un testo",
-    description=(
-            "Riceve un testo in formato JSON e restituisce il codice ISO della lingua "
-            "riconosciuta (IT, EN, DE) insieme alla confidenza della previsione."
-    ),
+    description="Riceve un testo in input e restituisce la lingua identificata (IT, EN, DE) con le relative probabilità."
 )
 async def identify_language(payload: TextInput) -> LanguageResponse:
     """
     Identifica la lingua del testo fornito.
-
-    - **text**: Il testo da analizzare (non può essere vuoto).
-
-    Restituisce:
-    - **language_code**: Codice ISO della lingua (es. "IT", "EN", "DE").
-    - **confidence**: Probabilità associata alla previsione (0.0 – 1.0).
     """
-    # --- Verifica disponibilità modello ---
-    pipeline = app.state.pipeline
-    if pipeline is None:
+
+    # Verifica disponibilità modello
+    language_identification_model = app.state.pipeline
+    if language_identification_model is None:
         logger.error("Richiesta ricevuta ma il modello non è disponibile.")
         raise HTTPException(
             status_code=503,
-            detail="Il modello di riconoscimento lingua non è disponibile. "
-                   "Contattare l'amministratore del sistema.",
+            detail="Il modello di riconoscimento lingua non è disponibile."
         )
 
-    # --- Log della richiesta ---
-    # Il testo viene troncato nel log per evitare entry troppo lunghe
-    text_preview = payload.text[:100] + "..." if len(payload.text) > 100 else payload.text
-    logger.info(f"Richiesta ricevuta | testo: \"{text_preview}\"")
+    logger.info(
+        f"Richiesta ricevuta | testo: \"{payload.text[:100] + "..." if len(payload.text) > 100 else payload.text}\"")
 
-    # --- Previsione ---
+    # Previsione
     try:
-
-        predicted_language = pipeline.predict([payload.text])[0]
-        predicted_proba = pipeline.predict_proba([payload.text])[0]
-
-        target_names = pipeline.classes_
-
+        predicted_language = language_identification_model.predict([payload.text])[0]
+        predicted_proba = language_identification_model.predict_proba([payload.text])[0]
+        target_names = language_identification_model.classes_
         predicted_proba_dict = {target_names[i]: predicted_proba[i] for i in range(len(predicted_proba))}
 
     except Exception as e:
@@ -193,10 +179,8 @@ async def identify_language(payload: TextInput) -> LanguageResponse:
             detail="Si è verificato un errore interno durante il riconoscimento della lingua.",
         )
 
-    # --- Log della risposta ---
-    logger.info(
-        f"Risposta inviata    | language_code: {predicted_language} | confidence: {predicted_proba_dict}"
-    )
+    # Log della risposta
+    logger.info(f"Risposta inviata | language_code: {predicted_language} | confidence: {predicted_proba_dict}")
 
     return LanguageResponse(predicted_probability=predicted_proba_dict, predicted_cls=predicted_language)
 
@@ -206,8 +190,4 @@ async def identify_language(payload: TextInput) -> LanguageResponse:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    uvicorn.run(
-        "app:app",
-        reload=False,  # reload=True utile solo in sviluppo
-        log_level="info",
-    )
+    uvicorn.run("app:app")
