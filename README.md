@@ -1,180 +1,142 @@
 # 🌐 Language Identification — MuseumLangID
 
-> **Progetto Finale** del corso *"Fundamentals of AI for Developers"* — [Profession.AI](https://profession.ai)
+API REST per il riconoscimento automatico della lingua di testi museali. Supporta **italiano (IT)**, **inglese (EN)** e*
+*tedesco (DE)**.
 
----
+Un museo internazionale necessita di identificare automaticamente la lingua delle descrizioni delle opere d'arte scritte
+in più lingue. Il progetto sviluppa un sistema di Machine Learning per l'identificazione automatica della lingua,
+esposto tramite API REST con FastAPI.
 
-## 📖 Descrizione del Progetto
-
-**MuseumLangID** è un sistema di Machine Learning per l'identificazione automatica della lingua di testi museali. Il
-progetto nasce dalla necessità di un museo internazionale di classificare automaticamente le descrizioni delle proprie
-opere d'arte, scritte in più lingue, eliminando la necessità di un'analisi manuale.
-
-Il modello è in grado di riconoscere la lingua di un testo tra **Italiano**, **Inglese** e **Tedesco**, con accuratezza
-del 100% sul dataset fornito.
-
----
-
-## 🏛️ Caso d'Uso Aziendale
-
-Il museo ospita una vasta collezione di opere d'arte con descrizioni in diverse lingue. Il personale aveva necessità di
-uno strumento per:
-
-- **Automatizzare** l'identificazione della lingua di ogni testo
-- **Processare** rapidamente grandi volumi di descrizioni
-- **Ridurre** gli errori umani nella classificazione
-
----
-
-## 📊 Dataset
-
-| Proprietà         | Valore                                               |
-|-------------------|------------------------------------------------------|
-| Totale campioni   | 294                                                  |
-| Lingue supportate | 3 (IT, EN, DE)                                       |
-| Distribuzione     | Bilanciata (98 campioni per lingua, 33.33% ciascuna) |
-| Colonne           | `Testo`, `Codice Lingua`                             |
-| Valori mancanti   | Nessuno                                              |
-
-**Fonte:
-** [Dataset su GitHub (Profession AI)](https://raw.githubusercontent.com/Profession-AI/progetti-ml/refs/heads/main/Modello%20per%20l%27identificazione%20della%20lingua%20dei%20testi%20di%20un%20museo/museo_descrizioni.csv)
-
----
-
-## ⚙️ Pipeline
+## Struttura del progetto
 
 ```
-Dataset CSV
-    │
-    ▼
-┌───────────────────────────┐
-│   Data Preprocessing      │
-│  - Lowercase              │
-│  - Rimozione punteggiatura│
-│  - Rimozione numeri       │
-│  - Rimozione spazi extra  │
-└───────────────────────────┘
-    │
-    ▼
-┌───────────────────────────┐
-│  Train/Test Split         │
-│  70% Train / 30% Test     │
-│  (stratificato)           │
-└───────────────────────────┘
-    │
-    ▼
-┌───────────────────────────┐
-│  TF-IDF Vectorization     │
-│  ngram_range = (1, 2)     │
-│  Vocabolario: 1568 feat.  │
-└───────────────────────────┘
-    │
-    ▼
-┌───────────────────────────┐
-│     Modelli ML            │
-│  1. Naive Bayes           │
-│  2. LinearSVC             │
-│  3. MLP Classifier        │
-└───────────────────────────┘
-    │
-    ▼
-┌───────────────────────────┐
-│      Valutazione          │
-│  Accuracy, Precision,     │
-│  Recall, F1-Score         │
-└───────────────────────────┘
+├── images/                  # Grafici e visualizzazioni generate dal notebook
+├── logs/                    # File di log dell'API (creati a runtime)
+├── models/                  # Modelli serializzati (.pkl), generati dal notebook
+├── src/
+│   ├── config.py            # Costanti di configurazione (logging, modelli)
+│   ├── logger.py            # Setup del logging (console + file con rotazione)
+│   ├── model_loader.py      # Utility per il caricamento dei modelli pickle
+│   ├── schemas.py           # Schemi Pydantic per validazione input/output
+│   ├── routes.py            # Definizione degli endpoint API
+│   ├── MuseumLangAPI.py     # Creazione app FastAPI e gestione lifespan
+│   └── main.py              # Entry point per l'avvio del server
+├── Language Identification - Models study.ipynb  # Studio e addestramento dei modelli
+├── requirements.txt
+└── README.md
 ```
 
-### Scelte di Preprocessing
+## Modelli
 
-- **Nessuna lemmatizzazione**: richiederebbe conoscere la lingua in anticipo (dipendenza circolare); inoltre la
-  morfologia (es. suffissi `-ings`, `-endo`, prefisso `ge-`) è informativa per la language identification.
-- **Stopwords mantenute**: articoli e preposizioni sono altamente discriminativi tra le lingue (es. `"the"`, `"il"`,
-  `"der"`).
-- **Bigrammi inclusi**: sequenze come `"de la"`, `"of the"`, `"in der"` aumentano la capacità discriminativa del
-  modello.
+Nel notebook vengono addestrati e confrontati 3 modelli di classificazione, tutti basati su feature TF-IDF (unigrammi +
+bigrammi):
 
----
+| Modello                         | Accuracy | Precision | Recall | F1-Score |
+|---------------------------------|----------|-----------|--------|----------|
+| **Naive Bayes (MultinomialNB)** | 1.00     | 1.00      | 1.00   | 1.00     |
+| **SVM (LinearSVC)**             | 1.00     | 1.00      | 1.00   | 1.00     |
+| **MLP (256 → 128, ReLU, Adam)** | 1.00     | 1.00      | 1.00   | 1.00     |
 
-## 🤖 Modelli
+Tutti e tre i modelli raggiungono performance perfette. Per la produzione si consiglia **Naive Bayes** o **Linear SVC**
+per la maggiore velocità di training e inferenza e l'assenza di iperparametri critici.
 
-| Modello                     | Descrizione                                                                                                          |
-|-----------------------------|----------------------------------------------------------------------------------------------------------------------|
-| **Multinomial Naive Bayes** | Classificatore probabilistico bayesiano, adatto per dati TF-IDF                                                      |
-| **LinearSVC**               | Support Vector Machine lineare, efficace per text classification                                                     |
-| **MLP Classifier**          | Rete neurale feed-forward con 2 layer nascosti (256 → 128 neuroni), attivazione ReLU, ottimizzatore Adam, 150 epoche |
+> **Nota:** I modelli non sono inclusi nel repository. È necessario eseguire il notebook
+`Language Identification - Models study.ipynb` prima di avviare l'API, per generare i file `.pkl` nella cartella
+`models/`.
 
----
+## Prerequisiti
 
-## 📈 Risultati
+- Python 3.10+
+- Le dipendenze elencate in `requirements.txt`
 
-Tutti e tre i modelli raggiungono **prestazioni perfette** sul test set:
+## Installazione
 
-| Modello        | Accuracy | Precision | Recall   | F1-Score |
-|----------------|----------|-----------|----------|----------|
-| Naive Bayes    | **1.00** | **1.00**  | **1.00** | **1.00** |
-| LinearSVC      | **1.00** | **1.00**  | **1.00** | **1.00** |
-| MLP Classifier | **1.00** | **1.00**  | **1.00** | **1.00** |
+```bash
+pip install -r requirements.txt
+```
 
-### Confronto Metriche
+## Generazione dei modelli
 
-![Confronto Modelli](images/modelli_comparison.png)
+Prima di avviare l'API, eseguire tutte le celle del notebook:
 
-### Matrici di Confusione
+```
+src/Language Identification - Models study.ipynb
+```
 
-![Matrici di Confusione](images/confusion_matrices.png)
+Questo creerà i seguenti file nella cartella `models/`:
 
----
+- `naive_bayes_model.pkl`
+- `svm_model.pkl`
+- `mlp_model.pkl`
 
-## ✅ Modello Consigliato per la Produzione
+## Avvio dell'API
 
-**Naive Bayes Multinomiale** o **LinearSVC**, perché:
+```bash
+cd src
+python main.py
+```
 
-- Training e inferenza più veloci rispetto alla rete neurale
-- Nessun iperparametro critico da ottimizzare (learning rate, architettura)
-- Risultati equivalenti a costi computazionali inferiori
+Il server sarà disponibile su `http://127.0.0.1:8000`. La documentazione interattiva è accessibile su
+`http://127.0.0.1:8000/docs`.
 
----
+## Endpoint
 
-## 🔧 Tecnologie Utilizzate
+### `GET /model-info`
 
-- **Python 3.13**
-- [scikit-learn](https://scikit-learn.org/) — modelli ML e metriche
-- [pandas](https://pandas.pydata.org/) — gestione del dataset
-- [numpy](https://numpy.org/) — operazioni numeriche
-- [matplotlib](https://matplotlib.org/) + [seaborn](https://seaborn.pydata.org/) — visualizzazioni
+Restituisce il modello attualmente attivo e la lista dei modelli disponibili.
 
----
+**Risposta:**
 
-## 🚀 Come Eseguire il Progetto
+```json
+{
+  "active_model": "naive_bayes",
+  "available_models": [
+    "naive_bayes",
+    "svm",
+    "mlp"
+  ]
+}
+```
 
-1. **Clona il repository:**
-   ```bash
-   git clone https://github.com/<tuo-username>/Language_Identification.git
-   cd Language_Identification
-   ```
+### `POST /switch-model`
 
-2. **Installa le dipendenze:**
-   ```bash
-   pip install scikit-learn pandas numpy matplotlib seaborn jupyter
-   ```
+Cambia il modello attivo a runtime.
 
-3. **Avvia il notebook:**
-   ```bash
-   jupyter notebook "Language Identification - Progetto Finale.ipynb"
-   ```
+**Body:**
 
----
+```json
+{
+  "model_name": "svm"
+}
+```
 
-## 🔭 Possibili Miglioramenti
+### `POST /identify-language`
 
-- **Character n-grams**: usare n-grammi a livello di carattere anziché di parola potrebbe rendere il modello più robusto
-  in scenari con più lingue, errori di battitura o testi molto brevi.
-- **Estensione multilingue**: aggiungere altre lingue (es. Francese, Spagnolo) aumentando la complessità del task.
-- **API REST**: esporre il modello come servizio HTTP per l'integrazione con il sistema museale esistente.
+Identifica la lingua di un singolo testo.
 
----
+**Body:**
 
-## 📄 Licenza
+```json
+{
+  "text": "Questo è un esempio di testo in italiano."
+}
+```
 
-Distribuito sotto licenza MIT. Vedi il file [LICENSE](LICENSE) per i dettagli.
+**Risposta:**
+
+```json
+{
+  "predicted_probability": {
+    "DE": 0.001,
+    "EN": 0.002,
+    "IT": 0.997
+  },
+  "predicted_cls": "IT"
+}
+```
+
+### `POST /predict-file`
+
+Identifica la lingua di più testi caricando un file `.txt` (un testo per riga).
+
+**Body:** `multipart/form-data` con campo `input_file`.
