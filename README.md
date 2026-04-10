@@ -26,6 +26,10 @@ esposto tramite API REST con FastAPI.
 └── README.md
 ```
 
+> **Nota:** I modelli non sono inclusi nel repository. È necessario eseguire il notebook
+`Language Identification - Models study.ipynb` prima di avviare l'API, per generare i file `.pkl` nella cartella
+`models/`.
+
 ## Modelli
 
 Nel notebook vengono addestrati e confrontati 3 modelli di classificazione, tutti basati su feature TF-IDF (unigrammi +
@@ -51,10 +55,6 @@ Il grafico seguente mette a confronto le 4 metriche principali (Accuracy, Precis
 Le matrici di confusione mostrano che nessun campione del test set viene classificato erroneamente: la diagonale principale contiene tutti i campioni (29 DE, 30 EN, 30 IT) e le celle fuori diagonale sono a zero. Questo risultato è coerente con il fatto che le tre lingue hanno caratteristiche lessicali e morfologiche molto distinte, facilmente catturabili tramite n-grammi TF-IDF.
 
 ![Matrici di confusione](images/confusion_matrices.png)
-
-> **Nota:** I modelli non sono inclusi nel repository. È necessario eseguire il notebook
-`Language Identification - Models study.ipynb` prima di avviare l'API, per generare i file `.pkl` nella cartella
-`models/`.
 
 ## Prerequisiti
 
