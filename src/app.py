@@ -51,7 +51,7 @@ MODEL_PATH = os.path.join(os.getcwd(), "../models/language_detection_pipeline.pk
 async def lifespan(app: FastAPI):
     """
     Gestisce il ciclo di vita dell'applicazione:
-    - All'avvio: carica il modello dal file pickle e lo salva in app.state.pipeline.
+    - All'avvio: carica il modello dal file pickle e lo salva in app.state.model.
     - Allo spegnimento: libera la risorsa.
     """
 
@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
             logger.info(f"Modello scaricato e salvato in: {MODEL_PATH}")
         except Exception as e:
             logger.error(f"Errore durante il download del modello: {e}")
-            app.state.pipeline = None
+            app.state.model = None
             yield
             return
 
@@ -72,16 +72,16 @@ async def lifespan(app: FastAPI):
     logger.info(f"Caricamento del modello da: {MODEL_PATH}")
     try:
         with open(MODEL_PATH, "rb") as f:
-            app.state.pipeline = pickle.load(f)
+            app.state.model = pickle.load(f)
         logger.info("Modello caricato con successo.")
     except Exception as e:
         logger.error(f"Errore durante il caricamento del modello: {e}")
-        app.state.pipeline = None
+        app.state.model = None
 
     yield  # L'applicazione è in esecuzione
 
     # Cleanup all'arresto
-    app.state.pipeline = None
+    app.state.model = None
     logger.info("Modello rilasciato. Applicazione terminata.")
 
 
@@ -142,7 +142,7 @@ def identify_language(payload: TextInput) -> LanguageResponse:
     """
 
     # Verifica disponibilità modello
-    language_identification_model = app.state.pipeline
+    language_identification_model = app.state.model
     if language_identification_model is None:
         logger.error("Richiesta ricevuta ma il modello non è disponibile.")
         raise HTTPException(status_code=503, detail="Il modello di riconoscimento lingua non è disponibile.")
@@ -183,8 +183,8 @@ def predict_file(input_file: UploadFile) -> List[LanguageResponse]:
     """
 
     # Verifica disponibilità modello
-    pipeline = app.state.pipeline
-    if pipeline is None:
+    language_identification_model = app.state.model
+    if language_identification_model is None:
         logger.error("Richiesta ricevuta ma il modello non è disponibile.")
         raise HTTPException(status_code=503, detail="Il modello di riconoscimento lingua non è disponibile.")
 
@@ -203,9 +203,9 @@ def predict_file(input_file: UploadFile) -> List[LanguageResponse]:
 
     # Previsione
     try:
-        predicted_languages = pipeline.predict(lines)
-        predicted_probability = pipeline.predict_proba(lines)
-        target_names = pipeline.classes_
+        predicted_languages = language_identification_model.predict(lines)
+        predicted_probability = language_identification_model.predict_proba(lines)
+        target_names = language_identification_model.classes_
 
         output = []
         for pred_cls, pred_probability_row in zip(predicted_languages, predicted_probability):
