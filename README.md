@@ -40,6 +40,18 @@ bigrammi):
 Tutti e tre i modelli raggiungono performance perfette. Per la produzione si consiglia **Naive Bayes** o **Linear SVC**
 per la maggiore velocità di training e inferenza e l'assenza di iperparametri critici.
 
+### Confronto delle metriche
+
+Il grafico seguente mette a confronto le 4 metriche principali (Accuracy, Precision, Recall, F1-Score) per ciascun modello. Tutti e tre raggiungono il valore massimo di 1.00 su ogni metrica, confermando che per questo dataset il task di identificazione della lingua è risolto in modo ottimale da ciascun approccio scelto.
+
+![Confronto metriche dei modelli](images/modelli_comparison.png)
+
+### Matrici di confusione
+
+Le matrici di confusione mostrano che nessun campione del test set viene classificato erroneamente: la diagonale principale contiene tutti i campioni (29 DE, 30 EN, 30 IT) e le celle fuori diagonale sono a zero. Questo risultato è coerente con il fatto che le tre lingue hanno caratteristiche lessicali e morfologiche molto distinte, facilmente catturabili tramite n-grammi TF-IDF.
+
+![Matrici di confusione](images/confusion_matrices.png)
+
 > **Nota:** I modelli non sono inclusi nel repository. È necessario eseguire il notebook
 `Language Identification - Models study.ipynb` prima di avviare l'API, per generare i file `.pkl` nella cartella
 `models/`.
