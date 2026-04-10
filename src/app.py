@@ -4,10 +4,10 @@ import pickle
 import urllib.request
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
-from typing import Dict
+from typing import Dict, List
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
@@ -89,14 +89,9 @@ async def lifespan(app: FastAPI):
 # Inizializzazione dell'Applicazione FastAPI
 # ---------------------------------------------------------------------------
 
-app = FastAPI(
-    title="MuseumLangAPI",
-    description=(
-        "API REST per il riconoscimento automatico della lingua di testi museali. "
-        "Supporta italiano (IT), inglese (EN) e tedesco (DE)."
-    ),
-    lifespan=lifespan,
-)
+app = FastAPI(title="MuseumLangAPI",
+              description="API REST per il riconoscimento automatico della lingua di testi museali. Supporta italiano (IT), inglese (EN) e tedesco (DE).",
+              lifespan=lifespan)
 
 
 # ---------------------------------------------------------------------------
@@ -137,18 +132,11 @@ class ErrorResponse(BaseModel):
 # Endpoint: POST /identify-language
 # ---------------------------------------------------------------------------
 
-@app.post(
-    "/identify-language",
-    response_model=LanguageResponse,
-    responses={
-        400: {"model": ErrorResponse, "description": "Testo vuoto o non valido."},
-        503: {"model": ErrorResponse, "description": "Modello non disponibile."},
-        500: {"model": ErrorResponse, "description": "Errore interno del server."},
-    },
-    summary="Identifica la lingua di un testo",
-    description="Riceve un testo in input e restituisce la lingua identificata (IT, EN, DE) con le relative probabilità."
-)
-async def identify_language(payload: TextInput) -> LanguageResponse:
+@app.post("/identify-language",
+          response_model=LanguageResponse,
+          summary="Identifica la lingua di un testo",
+          description="Riceve un testo in input e restituisce la lingua identificata (IT, EN, DE) con le relative probabilità.")
+def identify_language(payload: TextInput) -> LanguageResponse:
     """
     Identifica la lingua del testo fornito.
     """
@@ -157,10 +145,7 @@ async def identify_language(payload: TextInput) -> LanguageResponse:
     language_identification_model = app.state.pipeline
     if language_identification_model is None:
         logger.error("Richiesta ricevuta ma il modello non è disponibile.")
-        raise HTTPException(
-            status_code=503,
-            detail="Il modello di riconoscimento lingua non è disponibile."
-        )
+        raise HTTPException(status_code=503, detail="Il modello di riconoscimento lingua non è disponibile.")
 
     logger.info(
         f"Richiesta ricevuta | testo: \"{payload.text[:100] + "..." if len(payload.text) > 100 else payload.text}\"")
@@ -174,15 +159,65 @@ async def identify_language(payload: TextInput) -> LanguageResponse:
 
     except Exception as e:
         logger.error(f"Errore durante la previsione: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Si è verificato un errore interno durante il riconoscimento della lingua.",
-        )
+        raise HTTPException(status_code=500,
+                            detail="Si è verificato un errore interno durante il riconoscimento della lingua.")
 
     # Log della risposta
     logger.info(f"Risposta inviata | language_code: {predicted_language} | confidence: {predicted_proba_dict}")
 
     return LanguageResponse(predicted_probability=predicted_proba_dict, predicted_cls=predicted_language)
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /predict-file
+# ---------------------------------------------------------------------------
+
+@app.post("/predict-file",
+          response_model=List[LanguageResponse],
+          summary="Identifica la lingua di più testi da file",
+          description="Riceve un file .txt con un testo per riga e restituisce una lista di oggetti con la lingua identificata e le probabilità per ciascuna riga."
+          )
+def predict_file(input_file: UploadFile) -> List[LanguageResponse]:
+    """
+    Identifica la lingua di ogni riga del file caricato.
+    """
+
+    # Verifica disponibilità modello
+    pipeline = app.state.pipeline
+    if pipeline is None:
+        logger.error("Richiesta ricevuta ma il modello non è disponibile.")
+        raise HTTPException(status_code=503, detail="Il modello di riconoscimento lingua non è disponibile.")
+
+    # Lettura del file
+    try:
+        content = input_file.file.read().decode("utf-8")
+        lines = [line.strip() for line in content.splitlines() if line.strip()]
+    except Exception as e:
+        logger.error(f"Errore durante la lettura del file: {e}")
+        raise HTTPException(status_code=400, detail="Impossibile leggere il file caricato.")
+
+    if not lines:
+        raise HTTPException(status_code=400, detail="Il file è vuoto o non contiene righe valide.")
+
+    logger.info(f"Richiesta /predict-file ricevuta | righe da processare: {len(lines)}")
+
+    # Previsione
+    try:
+        predicted_languages = pipeline.predict(lines)
+        predicted_probability = pipeline.predict_proba(lines)
+        target_names = pipeline.classes_
+
+        output = []
+        for pred_cls, pred_probability_row in zip(predicted_languages, predicted_probability):
+            proba_dict = {target_names[i]: float(pred_probability_row[i]) for i in range(len(pred_probability_row))}
+            output.append(LanguageResponse(predicted_probability=proba_dict, predicted_cls=pred_cls))
+
+    except Exception as e:
+        logger.error(f"Errore durante la previsione batch: {e}")
+        raise HTTPException(status_code=500, detail="Si è verificato un errore durante il riconoscimento della lingua.")
+
+    logger.info(f"Risposta /predict-file inviata | righe processate: {len(output)}")
+    return output
 
 
 # ---------------------------------------------------------------------------
