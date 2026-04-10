@@ -1,11 +1,11 @@
 import logging
 import os
 import pickle
+import urllib.request
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from typing import Dict
 
-import numpy as np
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -29,15 +29,16 @@ logger = logging.getLogger("MuseumLangApi")
 logger.setLevel(logging.INFO)
 logger.propagate = False
 
-# Handler su console
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(log_formatter)
-logger.addHandler(console_handler)
+if not logger.handlers:
+    # Handler su console
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(log_formatter)
+    logger.addHandler(console_handler)
 
-# Handler su file con rotazione automatica
-file_handler = RotatingFileHandler(LOG_FILE, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT, encoding="utf-8")
-file_handler.setFormatter(log_formatter)
-logger.addHandler(file_handler)
+    # Handler su file con rotazione automatica
+    file_handler = RotatingFileHandler(LOG_FILE, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT, encoding="utf-8")
+    file_handler.setFormatter(log_formatter)
+    logger.addHandler(file_handler)
 
 # ---------------------------------------------------------------------------
 # Caricamento del Modello
@@ -45,7 +46,9 @@ logger.addHandler(file_handler)
 # Il modello viene caricato una sola volta all'avvio dell'applicazione tramite
 # il meccanismo 'lifespan' di FastAPI.
 
-MODEL_PATH = os.path.join(os.getcwd(), "../models/mlp_model.pkl")
+MODEL_URL = "https://raw.githubusercontent.com/Profession-AI/progetti-python/refs/heads/main/Messa%20in%20produzione%20di%20un%20sistema%20per%20il%20riconoscimento%20della%20lingua%20di%20testi%20per%20un%20museo/language_detection_pipeline.pkl"
+
+MODEL_PATH = os.path.join(os.getcwd(), "../models/language_detection_pipeline.pkl")
 
 
 # ---------------------------------------------------------------------------
@@ -59,14 +62,25 @@ async def lifespan(app: FastAPI):
     - All'avvio: carica il modello dal file pickle e lo salva in app.state.pipeline.
     - Allo spegnimento: libera la risorsa.
     """
+    # --- Download del modello se non già presente ---
+    if not os.path.exists(MODEL_PATH):
+        logger.info(f"Modello non trovato localmente. Download da: {MODEL_URL}")
+        try:
+            os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+            urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+            logger.info(f"Modello scaricato e salvato in: {MODEL_PATH}")
+        except Exception as e:
+            logger.error(f"Errore durante il download del modello: {e}")
+            app.state.pipeline = None
+            yield
+            return
+
+    # --- Caricamento del modello ---
     logger.info(f"Caricamento del modello da: {MODEL_PATH}")
     try:
         with open(MODEL_PATH, "rb") as f:
             app.state.pipeline = pickle.load(f)
         logger.info("Modello caricato con successo.")
-    except FileNotFoundError:
-        logger.error(f"File del modello non trovato: {MODEL_PATH}")
-        app.state.pipeline = None
     except Exception as e:
         logger.error(f"Errore durante il caricamento del modello: {e}")
         app.state.pipeline = None
@@ -164,15 +178,13 @@ async def identify_language(payload: TextInput) -> LanguageResponse:
 
     # --- Previsione ---
     try:
-        text_to_classify = np.array([payload.text]).reshape(-1, 1)
 
-        predicted_language = pipeline.predict(text_to_classify)[0]
-        predicted_proba = pipeline.predict_proba(text_to_classify)[0]
+        predicted_language = pipeline.predict([payload.text])[0]
+        predicted_proba = pipeline.predict_proba([payload.text])[0]
 
         target_names = pipeline.classes_
 
         predicted_proba_dict = {target_names[i]: predicted_proba[i] for i in range(len(predicted_proba))}
-        predicted_cls_name = target_names[predicted_language]
 
     except Exception as e:
         logger.error(f"Errore durante la previsione: {e}")
@@ -186,7 +198,7 @@ async def identify_language(payload: TextInput) -> LanguageResponse:
         f"Risposta inviata    | language_code: {predicted_language} | confidence: {predicted_proba_dict}"
     )
 
-    return LanguageResponse(predicted_probability=predicted_proba_dict, predicted_cls=predicted_cls_name)
+    return LanguageResponse(predicted_probability=predicted_proba_dict, predicted_cls=predicted_language)
 
 
 # ---------------------------------------------------------------------------
