@@ -3,5 +3,8 @@ uvicorn
 pydantic
 scikit-learn
 pandas
+numpy
 matplotlib
 seaborn
+pytest
+httpx
