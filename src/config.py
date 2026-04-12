@@ -19,4 +19,6 @@ AVAILABLE_MODELS = {
     "mlp": os.path.join(MODELS_DIR, "mlp_model.pkl"),
 }
 
+VECTORIZER_PATH = os.path.join(MODELS_DIR, "tfidf_vectorizer.pkl")
+
 DEFAULT_MODEL = "naive_bayes"

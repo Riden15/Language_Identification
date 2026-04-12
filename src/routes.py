@@ -2,7 +2,7 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from config import AVAILABLE_MODELS
-from model_loader import load_model
+from utils import load_model, preprocess_text, data_cleaner
 from logger import logger
 from schemas import LanguageResponse, ModelInfoResponse, ModelSwitchInput, TextInput
 
@@ -68,19 +68,23 @@ def identify_language(payload: TextInput, request: Request) -> LanguageResponse:
     Identifica la lingua del testo fornito.
     """
 
-    # Verifica disponibilità modello
+    # Verifica disponibilità modello e vectorizer
     language_identification_model = request.app.state.model
-    if language_identification_model is None:
-        logger.error("Richiesta ricevuta ma il modello non è disponibile.")
+    vectorizer = request.app.state.vectorizer
+    if language_identification_model is None or vectorizer is None:
+        logger.error("Richiesta ricevuta ma il modello o il vectorizer non è disponibile.")
         raise HTTPException(status_code=503, detail="Il modello di riconoscimento lingua non è disponibile.")
 
     logger.info(
         f"Richiesta ricevuta | testo: \"{payload.text[:100] + '...' if len(payload.text) > 100 else payload.text}\"")
 
-    # Previsione
+    # Preprocessing e Previsione
     try:
-        predicted_language = language_identification_model.predict([payload.text])[0]
-        predicted_proba = language_identification_model.predict_proba([payload.text])[0]
+        cleaned_text = preprocess_text(payload.text)
+        text_to_predict = vectorizer.transform([cleaned_text])
+
+        predicted_language = language_identification_model.predict(text_to_predict)[0]
+        predicted_proba = language_identification_model.predict_proba(text_to_predict)[0]
         target_names = language_identification_model.classes_
         predicted_proba_dict = {target_names[i]: predicted_proba[i] for i in range(len(predicted_proba))}
 
@@ -109,10 +113,11 @@ def predict_file(input_file: UploadFile, request: Request) -> List[LanguageRespo
     Identifica la lingua di ogni riga del file caricato.
     """
 
-    # Verifica disponibilità modello
+    # Verifica disponibilità modello e vectorizer
     language_identification_model = request.app.state.model
-    if language_identification_model is None:
-        logger.error("Richiesta ricevuta ma il modello non è disponibile.")
+    vectorizer = request.app.state.vectorizer
+    if language_identification_model is None or vectorizer is None:
+        logger.error("Richiesta ricevuta ma il modello o il vectorizer non è disponibile.")
         raise HTTPException(status_code=503, detail="Il modello di riconoscimento lingua non è disponibile.")
 
     # Lettura del file
@@ -128,10 +133,12 @@ def predict_file(input_file: UploadFile, request: Request) -> List[LanguageRespo
 
     logger.info(f"Richiesta /predict-file ricevuta | righe da processare: {len(lines)}")
 
-    # Previsione
+    # Preprocessing e Previsione
     try:
-        predicted_languages = language_identification_model.predict(lines)
-        predicted_probability = language_identification_model.predict_proba(lines)
+        lines = data_cleaner(lines)
+        lines_tfidf = vectorizer.transform(lines)
+        predicted_languages = language_identification_model.predict(lines_tfidf)
+        predicted_probability = language_identification_model.predict_proba(lines_tfidf)
         target_names = language_identification_model.classes_
 
         output = []

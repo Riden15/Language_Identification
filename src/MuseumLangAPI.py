@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from config import DEFAULT_MODEL
 from logger import logger
-from model_loader import load_model
+from utils import load_model, load_vectorizer
 from routes import router
 
 
@@ -17,9 +17,17 @@ from routes import router
 async def lifespan(app: FastAPI):
     """
     Gestisce il ciclo di vita dell'applicazione:
-    - All'avvio: carica il modello di default.
-    - Allo spegnimento: libera la risorsa.
+    - All'avvio: carica il vectorizer TF-IDF e il modello di default.
+    - Allo spegnimento: libera le risorse.
     """
+    logger.info("Caricamento del vectorizer TF-IDF...")
+    try:
+        app.state.vectorizer = load_vectorizer()
+        logger.info("Vectorizer caricato con successo.")
+    except Exception as e:
+        logger.error(f"Errore durante il caricamento del vectorizer: {e}")
+        app.state.vectorizer = None
+
     logger.info(f"Caricamento del modello di default: '{DEFAULT_MODEL}'")
     try:
         app.state.model = load_model(DEFAULT_MODEL)
@@ -35,7 +43,8 @@ async def lifespan(app: FastAPI):
     # Cleanup all'arresto
     app.state.model = None
     app.state.active_model_name = None
-    logger.info("Modello rilasciato. Applicazione terminata.")
+    app.state.vectorizer = None
+    logger.info("Risorse rilasciate. Applicazione terminata.")
 
 
 # ---------------------------------------------------------------------------
